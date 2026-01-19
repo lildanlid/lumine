@@ -1,123 +1,150 @@
-// monitor-web.js
-const express = require("express");
-const http = require("http");
+// lumine-monitor.js
 const https = require("https");
 const notifier = require("node-notifier");
+const express = require("express");
 const { Server } = require("socket.io");
+const http = require("http");
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-app.use(express.static(__dirname + "/public"));
-app.use(express.json());
+const WEBSITE = "https://lumineproxy.org/";
+let online = false;
+const INTERVAL = 10000; // 10 seconds
+let countdown = INTERVAL / 1000;
 
-// Data
-let websites = [];
-let status = {};
-
-// Serve the main page
+// Serve web page
 app.get("/", (req, res) => {
   res.send(`
   <!DOCTYPE html>
   <html>
   <head>
-    <title>Website Monitor</title>
+    <title>Lumine Proxy Monitor</title>
     <style>
-      body { font-family: sans-serif; padding: 20px; }
-      input, button { padding: 5px; margin: 5px; }
-      ul { list-style: none; padding: 0; }
-      li { margin: 5px 0; }
-      .online { color: green; }
-      .offline { color: red; }
+      body {
+        margin: 0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        background-color: #121212;
+        color: white;
+        font-family: sans-serif;
+      }
+      .panel {
+        background-color: #1f1f1f;
+        padding: 30px 50px;
+        border-radius: 15px;
+        text-align: center;
+        box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        margin-bottom: 80px; /* space for footer */
+      }
+      .status {
+        font-size: 28px;
+        margin-bottom: 15px;
+      }
+      .timer {
+        font-size: 16px;
+        color: #aaa;
+      }
+      footer {
+        position: fixed;
+        bottom: 0;
+        width: 100%;
+        text-align: center;
+        padding: 15px 0;
+        background-color: #1a1a1a;
+      }
+      button {
+        padding: 12px 25px;
+        font-size: 16px;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        background-color: #4caf50;
+        color: white;
+      }
+      button:hover {
+        background-color: #45a049;
+      }
     </style>
   </head>
   <body>
-    <h1>Website Monitor</h1>
-    <input id="urlInput" placeholder="Enter website URL"/>
-    <button onclick="addSite()">Add Website</button>
-    <ul id="sites"></ul>
+    <div class="panel">
+      <div class="status" id="status">Checking...</div>
+      <div class="timer" id="timer">Next ping in 10s</div>
+      <audio id="alertSound" src="https://www.soundjay.com/buttons/beep-07.wav" preload="auto"></audio>
+    </div>
+
+    <footer>
+      <button onclick="visitSite()">Visit Website</button>
+    </footer>
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
       const socket = io();
-      const sitesList = document.getElementById("sites");
+      const statusEl = document.getElementById("status");
+      const timerEl = document.getElementById("timer");
+      const sound = document.getElementById("alertSound");
+      let lastOnline = false;
+      let countdown = ${INTERVAL / 1000};
 
-      function addSite() {
-        const url = document.getElementById("urlInput").value;
-        if (!url) return;
-        socket.emit("addWebsite", url);
-        document.getElementById("urlInput").value = "";
-      }
-
-      function removeSite(url) {
-        socket.emit("removeWebsite", url);
-      }
+      // Update countdown every second
+      setInterval(() => {
+        countdown--;
+        if (countdown <= 0) countdown = ${INTERVAL / 1000};
+        timerEl.textContent = "Next ping in " + countdown + "s";
+      }, 1000);
 
       socket.on("statusUpdate", data => {
-        sitesList.innerHTML = "";
-        data.forEach(site => {
-          const li = document.createElement("li");
-          li.innerHTML = '<span class="' + (site.online ? 'online' : 'offline') + '">' 
-                         + site.url + ' - ' + (site.online ? 'Online' : 'Offline') + '</span>'
-                         + ' <button onclick="removeSite(\\'' + site.url + '\\')">Remove</button>';
-          sitesList.appendChild(li);
-        });
+        statusEl.textContent = data.online ? "Online ✅" : "Offline ❌";
+        if (data.online && !lastOnline) {
+          sound.play();
+        }
+        lastOnline = data.online;
+        countdown = ${INTERVAL / 1000}; // reset timer on ping
       });
+
+      function visitSite() {
+        window.open("${WEBSITE}", "_blank");
+      }
     </script>
   </body>
   </html>
   `);
 });
 
-// Socket.IO for live updates
-io.on("connection", (socket) => {
-  socket.emit("statusUpdate", websites.map(url => ({ url, online: status[url] || false })));
-
-  socket.on("addWebsite", (url) => {
-    if (!websites.includes(url)) websites.push(url);
-    io.emit("statusUpdate", websites.map(u => ({ url: u, online: status[u] || false })));
-  });
-
-  socket.on("removeWebsite", (url) => {
-    websites = websites.filter(u => u !== url);
-    io.emit("statusUpdate", websites.map(u => ({ url: u, online: status[u] || false })));
-  });
-});
-
-// Function to check a website
-function checkWebsite(url) {
-  const lib = url.startsWith("https") ? https : http;
-  const req = lib.get(url, (res) => {
-    if (!status[url]) {
-      notifier.notify({
-        title: "Website Online",
-        message: `${url} is now online!`,
-      });
-      console.log(`${url} is online`);
+// Ping the website
+function checkWebsite() {
+  https.get(WEBSITE, (res) => {
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      if (!online) {
+        notifier.notify({
+          title: "Lumine Proxy Online",
+          message: `${WEBSITE} is now online!`,
+        });
+        console.log(`${WEBSITE} is online`);
+      }
+      online = true;
+    } else {
+      online = false;
+      console.log(`${WEBSITE} responded with status code ${res.statusCode}`);
     }
-    status[url] = true;
-    io.emit("statusUpdate", websites.map(u => ({ url: u, online: status[u] || false })));
-  });
-
-  req.on("error", () => {
-    status[url] = false;
-    io.emit("statusUpdate", websites.map(u => ({ url: u, online: status[u] || false })));
-  });
-
-  req.setTimeout(5000, () => {
-    req.abort();
-    status[url] = false;
-    io.emit("statusUpdate", websites.map(u => ({ url: u, online: status[u] || false })));
+    io.emit("statusUpdate", { online });
+  }).on("error", (err) => {
+    online = false;
+    io.emit("statusUpdate", { online });
+    console.log(`${WEBSITE} is offline: ${err.message}`);
   });
 }
 
-// Start monitoring every 10 seconds
-setInterval(() => {
-  websites.forEach(checkWebsite);
-}, 10000);
+// Start monitoring every INTERVAL
+setInterval(checkWebsite, INTERVAL);
+checkWebsite(); // initial check
 
 // Start server
 server.listen(3000, () => {
-  console.log("Server running on http://localhost:3000");
+  console.log("Lumine Proxy Monitor running at http://localhost:3000");
 });
