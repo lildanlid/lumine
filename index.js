@@ -58,8 +58,9 @@ app.get("/", (req, res) => {
         sitesList.innerHTML = "";
         data.forEach(site => {
           const li = document.createElement("li");
-          li.innerHTML = `<span class="${site.online ? 'online' : 'offline'}">${site.url} - ${site.online ? 'Online' : 'Offline'}</span> 
-                          <button onclick="removeSite('${site.url}')">Remove</button>`;
+          li.innerHTML = '<span class="' + (site.online ? 'online' : 'offline') + '">' 
+                         + site.url + ' - ' + (site.online ? 'Online' : 'Offline') + '</span>'
+                         + ' <button onclick="removeSite(\\'' + site.url + '\\')">Remove</button>';
           sitesList.appendChild(li);
         });
       });
@@ -75,16 +76,16 @@ io.on("connection", (socket) => {
 
   socket.on("addWebsite", (url) => {
     if (!websites.includes(url)) websites.push(url);
-    socket.emit("statusUpdate", websites.map(u => ({ url: u, online: status[u] || false })));
+    io.emit("statusUpdate", websites.map(u => ({ url: u, online: status[u] || false })));
   });
 
   socket.on("removeWebsite", (url) => {
     websites = websites.filter(u => u !== url);
-    socket.emit("statusUpdate", websites.map(u => ({ url: u, online: status[u] || false })));
+    io.emit("statusUpdate", websites.map(u => ({ url: u, online: status[u] || false })));
   });
 });
 
-// Check websites
+// Function to check a website
 function checkWebsite(url) {
   const lib = url.startsWith("https") ? https : http;
   const req = lib.get(url, (res) => {
@@ -111,11 +112,12 @@ function checkWebsite(url) {
   });
 }
 
-// Start monitoring
+// Start monitoring every 10 seconds
 setInterval(() => {
   websites.forEach(checkWebsite);
-}, 10000); // every 10 seconds
+}, 10000);
 
+// Start server
 server.listen(3000, () => {
   console.log("Server running on http://localhost:3000");
 });
