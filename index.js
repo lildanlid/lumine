@@ -20,7 +20,7 @@ app.get("/", (req, res) => {
   <!DOCTYPE html>
   <html>
   <head>
-    <title>Lumine Proxy Monitor</title>
+    <title>Lumine Come Back Online</title>
     <style>
       body {
         margin: 0;
@@ -74,7 +74,7 @@ app.get("/", (req, res) => {
   <body>
     <div class="panel">
       <div class="status" id="status">Checking...</div>
-      <div class="timer" id="timer">Next ping in 10s</div>
+      <div class="timer" id="timer">Next Check in 10s</div>
       <audio id="alertSound" src="https://www.soundjay.com/buttons/beep-07.wav" preload="auto"></audio>
     </div>
 
