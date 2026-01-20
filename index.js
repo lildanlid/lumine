@@ -1,6 +1,8 @@
+require('dotenv').config();
 const https = require("https");
 const notifier = require("node-notifier");
 const express = require("express");
+const cookieParser = require("cookie-parser");
 const { Server } = require("socket.io");
 const http = require("http");
 
@@ -8,11 +10,14 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
+app.use(cookieParser());
+
 const CONFIG = {
   website: "https://lumineproxy.org/",
   interval: 10000,
-  port: 3000,
-  maintenanceText: "Lumine is down for maintenance. Check the Discord for updates."
+  port: process.env.PORT || 3000,
+  maintenanceText: "Lumine is down for maintenance. Check the Discord for updates.",
+  linkvertiseUserId: process.env.LINKVERTISE_USER_ID || "YOUR_ID_HERE" 
 };
 
 let currentState = {
@@ -22,7 +27,86 @@ let currentState = {
   reason: "checking"
 };
 
+function getLinkvertiseUrl(req) {
+  const protocol = req.protocol;
+  const host = req.get('host');
+  const redirectTarget = `${protocol}://${host}/verify`;
+
+  const base64Target = Buffer.from(redirectTarget).toString('base64');
+
+  return `https://link-to.net/${CONFIG.linkvertiseUserId}/${Math.random().toString(36).substring(7)}/dynamic?r=${base64Target}`;
+}
+
+// --- ROUTE: Verification Handler ---
+app.get("/verify", (req, res) => {
+  const threeHours = 3 * 60 * 60 * 1000;
+
+  res.cookie('access_granted', 'true', { maxAge: threeHours, httpOnly: true });
+
+  res.redirect("/?status=authorized");
+});
+
 app.get("/", (req, res) => {
+  const hasAccess = req.cookies['access_granted'];
+
+  if (!hasAccess) {
+    const taskLink = getLinkvertiseUrl(req);
+
+    return res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Lumine Monitor | Verification</title>
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;700&display=swap" rel="stylesheet">
+      <style>
+        body {
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            font-family: 'Inter', sans-serif;
+            color: white;
+        }
+        .card {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(16px);
+            padding: 40px;
+            border-radius: 24px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            text-align: center;
+            max-width: 400px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+        h1 { font-weight: 300; margin-bottom: 20px; }
+        p { color: rgba(255,255,255,0.7); margin-bottom: 30px; line-height: 1.5; }
+        .btn {
+            display: inline-block;
+            background: #00ff88;
+            color: #0f0c29;
+            padding: 15px 30px;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: bold;
+            transition: transform 0.2s;
+        }
+        .btn:hover { transform: scale(1.05); box-shadow: 0 0 20px rgba(0,255,136,0.4); }
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <h1>🔒 Access Required</h1>
+        <p>To use this site you must complete this task. It creates a Linkvertise task, and once completed, gives you <strong>3 hours</strong> of access to the website.</p>
+        <a href="${taskLink}" class="btn">Complete Task & Unlock</a>
+      </div>
+    </body>
+    </html>
+    `);
+  }
+
   res.send(`
   <!DOCTYPE html>
   <html lang="en">
@@ -190,6 +274,14 @@ app.get("/", (req, res) => {
         70% { box-shadow: 0 0 0 15px rgba(255, 51, 102, 0); }
         100% { box-shadow: 0 0 0 0 rgba(255, 51, 102, 0); }
       }
+
+      .access-timer {
+        position: absolute;
+        bottom: 10px;
+        right: 15px;
+        font-size: 10px;
+        color: rgba(255,255,255,0.3);
+      }
     </style>
   </head>
   <body>
@@ -215,6 +307,7 @@ app.get("/", (req, res) => {
       </div>
 
       <button onclick="enableSound()" class="btn">Enable Audio Alerts</button>
+      <div class="access-timer">Session expires in 3h</div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
@@ -238,6 +331,21 @@ app.get("/", (req, res) => {
       function enableSound() {
         alertSound.play().then(() => { alertSound.pause(); alertSound.currentTime = 0; });
         if(Notification.permission !== "granted") Notification.requestPermission();
+      }
+
+      const urlParams = new URLSearchParams(window.location.search);
+      if(urlParams.get('status') === 'authorized') {
+          // Send Device Notification
+          if(Notification.permission === "granted") {
+              new Notification("Access Granted", { body: "You have 3 hours of access to Lumine Monitor." });
+          } else if (Notification.permission !== "denied") {
+              Notification.requestPermission().then(permission => {
+                  if (permission === "granted") {
+                      new Notification("Access Granted", { body: "You have 3 hours of access to Lumine Monitor." });
+                  }
+              });
+          }
+          window.history.replaceState({}, document.title, "/");
       }
 
       setInterval(() => {
@@ -328,23 +436,15 @@ app.get("/", (req, res) => {
 function checkWebsite() {
   const req = https.request(CONFIG.website, { method: 'GET', timeout: 5000 }, (res) => {
     let body = '';
-
-    res.on('data', (chunk) => {
-      body += chunk;
-    });
+    res.on('data', (chunk) => { body += chunk; });
 
     res.on('end', () => {
       const statusOk = res.statusCode >= 200 && res.statusCode < 300;
-
       const hasMaintenance = body.includes(CONFIG.maintenanceText);
 
-      if (!statusOk) {
-        handleState(false, 'error');
-      } else if (hasMaintenance) {
-        handleState(false, 'maintenance');
-      } else {
-        handleState(true, 'online');
-      }
+      if (!statusOk) handleState(false, 'error');
+      else if (hasMaintenance) handleState(false, 'maintenance');
+      else handleState(true, 'online');
     });
   });
 
@@ -355,7 +455,6 @@ function checkWebsite() {
 
 function handleState(isNowOnline, reason) {
   const now = Date.now();
-
   if (!isNowOnline) {
     if (!currentState.offlineSince) {
       currentState.offlineSince = now;
@@ -369,11 +468,9 @@ function handleState(isNowOnline, reason) {
     }
     currentState.offlineSince = null;
   }
-
   currentState.online = isNowOnline;
   currentState.lastChecked = now;
   currentState.reason = reason;
-
   io.emit("statusUpdate", currentState);
 }
 
