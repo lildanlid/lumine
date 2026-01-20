@@ -10,14 +10,16 @@ const io = new Server(server);
 
 const CONFIG = {
   website: "https://lumineproxy.org/",
-  interval: 10000, 
-  port: 3000
+  interval: 10000,
+  port: 3000,
+  maintenanceText: "Lumine is down for maintenance. Check the Discord for updates."
 };
 
 let currentState = {
   online: false,
   lastChecked: Date.now(),
-  offlineSince: new Date('1/18/2026 10:21:00 PM').getTime()
+  offlineSince: new Date('1/18/2026 10:21:00 PM').getTime(),
+  reason: "checking"
 };
 
 app.get("/", (req, res) => {
@@ -36,6 +38,7 @@ app.get("/", (req, res) => {
         --text-color: #ffffff;
         --success: #00ff88;
         --error: #ff3366;
+        --warning: #ffaa00;
       }
 
       body {
@@ -100,12 +103,20 @@ app.get("/", (req, res) => {
         box-shadow: 0 0 30px var(--success), inset 0 0 20px var(--success);
         border: 2px solid var(--success);
       }
-      
+
       .offline .status-circle {
         background: rgba(255, 51, 102, 0.1);
         color: var(--error);
         box-shadow: 0 0 30px var(--error), inset 0 0 20px var(--error);
         border: 2px solid var(--error);
+        animation: pulse 2s infinite;
+      }
+
+      .maintenance .status-circle {
+        background: rgba(255, 170, 0, 0.1);
+        color: var(--warning);
+        box-shadow: 0 0 30px var(--warning), inset 0 0 20px var(--warning);
+        border: 2px solid var(--warning);
         animation: pulse 2s infinite;
       }
 
@@ -117,13 +128,24 @@ app.get("/", (req, res) => {
         padding: 15px;
         margin-top: 15px;
       }
-      
+
+      .maintenance .downtime-container,
+      .downtime-container.maintenance-mode {
+        background: rgba(255, 170, 0, 0.1);
+        border: 1px solid rgba(255, 170, 0, 0.3);
+      }
+
       .clock-label {
         font-size: 10px;
         text-transform: uppercase;
         letter-spacing: 2px;
         color: #ff3366;
         margin-bottom: 5px;
+      }
+
+      .maintenance .clock-label,
+      .clock-label.maintenance-mode {
+        color: #ffaa00;
       }
 
       .downtime-val {
@@ -172,7 +194,7 @@ app.get("/", (req, res) => {
   </head>
   <body>
     <div class="bg-animation"></div>
-    
+
     <div class="container">
       <h1>LUMINE PROXY</h1>
       <h2>System Monitor</h2>
@@ -182,13 +204,13 @@ app.get("/", (req, res) => {
         <div class="status-text" id="statusText">Checking...</div>
         <div class="status-sub" id="statusDetails">Waiting for server</div>
       </div>
-      
+
       <div class="progress-container">
         <div class="progress-bar" id="progressBar"></div>
       </div>
 
       <div id="downtimeBox" class="downtime-container">
-        <div class="clock-label">Current Downtime</div>
+        <div class="clock-label" id="clockLabel">Current Downtime</div>
         <div class="downtime-val" id="downtimeTimer">00:00:00</div>
       </div>
 
@@ -198,7 +220,7 @@ app.get("/", (req, res) => {
     <script src="/socket.io/socket.io.js"></script>
     <script>
       const socket = io();
-      
+
       const statusInd = document.getElementById('statusIndicator');
       const statusText = document.getElementById('statusText');
       const statusDetails = document.getElementById('statusDetails');
@@ -206,9 +228,11 @@ app.get("/", (req, res) => {
       const progressBar = document.getElementById('progressBar');
       const downtimeBox = document.getElementById('downtimeBox');
       const downtimeTimer = document.getElementById('downtimeTimer');
+      const clockLabel = document.getElementById('clockLabel');
 
       let isOnline = false;
-      let offlineSince = null; 
+      let offlineSince = null;
+      let currentReason = '';
 
       const alertSound = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
       function enableSound() {
@@ -220,7 +244,7 @@ app.get("/", (req, res) => {
         if (!isOnline && offlineSince) {
           const now = Date.now();
           const diff = now - offlineSince;
-          
+
           if(diff >= 0) {
             const hrs = Math.floor(diff / (1000 * 60 * 60));
             const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
@@ -237,16 +261,26 @@ app.get("/", (req, res) => {
       socket.on('statusUpdate', (data) => {
         updateUI(data);
         resetBar();
-        
+
         if (data.online && !isOnline) {
           triggerOnlineAlert();
         }
-        
+
         isOnline = data.online;
-        offlineSince = data.offlineSince; 
-        
+        offlineSince = data.offlineSince;
+        currentReason = data.reason;
+
         if (!isOnline) {
           downtimeBox.style.display = 'block';
+          if (currentReason === 'maintenance') {
+            downtimeBox.classList.add('maintenance-mode');
+            clockLabel.classList.add('maintenance-mode');
+            clockLabel.innerText = 'Maintenance Duration';
+          } else {
+            downtimeBox.classList.remove('maintenance-mode');
+            clockLabel.classList.remove('maintenance-mode');
+            clockLabel.innerText = 'Current Downtime';
+          }
         } else {
           downtimeBox.style.display = 'none';
         }
@@ -258,6 +292,11 @@ app.get("/", (req, res) => {
           statusText.innerText = 'ONLINE';
           statusDetails.innerText = 'Connected Successfully';
           icon.innerText = '✓';
+        } else if (data.reason === 'maintenance') {
+          statusInd.className = 'maintenance';
+          statusText.innerText = 'MAINTENANCE';
+          statusDetails.innerText = 'Scheduled Maintenance';
+          icon.innerText = '🔧';
         } else {
           statusInd.className = 'offline';
           statusText.innerText = 'OFFLINE';
@@ -287,25 +326,41 @@ app.get("/", (req, res) => {
 });
 
 function checkWebsite() {
-  const options = { method: 'HEAD', timeout: 5000 };
-  
-  const req = https.request(CONFIG.website, options, (res) => {
-    const online = res.statusCode >= 200 && res.statusCode < 300;
-    handleState(online);
+  const req = https.request(CONFIG.website, { method: 'GET', timeout: 5000 }, (res) => {
+    let body = '';
+
+    res.on('data', (chunk) => {
+      body += chunk;
+    });
+
+    res.on('end', () => {
+      const statusOk = res.statusCode >= 200 && res.statusCode < 300;
+
+      const hasMaintenance = body.includes(CONFIG.maintenanceText);
+
+      if (!statusOk) {
+        handleState(false, 'error');
+      } else if (hasMaintenance) {
+        handleState(false, 'maintenance');
+      } else {
+        handleState(true, 'online');
+      }
+    });
   });
 
-  req.on('error', () => handleState(false));
-  req.on('timeout', () => { req.destroy(); handleState(false); });
+  req.on('error', () => handleState(false, 'error'));
+  req.on('timeout', () => { req.destroy(); handleState(false, 'timeout'); });
   req.end();
 }
 
-function handleState(isNowOnline) {
+function handleState(isNowOnline, reason) {
   const now = Date.now();
 
   if (!isNowOnline) {
     if (!currentState.offlineSince) {
       currentState.offlineSince = now;
-      console.log(`[${new Date().toLocaleTimeString()}] Site went OFFLINE`);
+      const reasonText = reason === 'maintenance' ? 'MAINTENANCE MODE' : 'OFFLINE';
+      console.log(`[${new Date().toLocaleTimeString()}] Site went ${reasonText}`);
     }
   } else {
     if (currentState.offlineSince) {
@@ -317,6 +372,7 @@ function handleState(isNowOnline) {
 
   currentState.online = isNowOnline;
   currentState.lastChecked = now;
+  currentState.reason = reason;
 
   io.emit("statusUpdate", currentState);
 }
