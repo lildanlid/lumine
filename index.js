@@ -10,14 +10,14 @@ const io = new Server(server);
 
 const CONFIG = {
   website: "https://lumineproxy.org/",
-  interval: 10000,
+  interval: 10000, 
   port: 3000
 };
 
 let currentState = {
   online: false,
   lastChecked: Date.now(),
-  offlineSince: null 
+  offlineSince: new Date('1/18/2026 10:21:00 PM').getTime()
 };
 
 app.get("/", (req, res) => {
@@ -108,7 +108,7 @@ app.get("/", (req, res) => {
         border: 2px solid var(--error);
         animation: pulse 2s infinite;
       }
-      
+
       .downtime-container {
         display: none; 
         background: rgba(255, 51, 102, 0.1);
@@ -134,7 +134,6 @@ app.get("/", (req, res) => {
         text-shadow: 0 0 10px rgba(255, 51, 102, 0.5);
       }
 
-      /* Progress Bar */
       .progress-container {
         width: 100%;
         height: 2px;
@@ -188,7 +187,6 @@ app.get("/", (req, res) => {
         <div class="progress-bar" id="progressBar"></div>
       </div>
 
-      <!-- Downtime Counter (Only shows when offline) -->
       <div id="downtimeBox" class="downtime-container">
         <div class="clock-label">Current Downtime</div>
         <div class="downtime-val" id="downtimeTimer">00:00:00</div>
@@ -210,7 +208,7 @@ app.get("/", (req, res) => {
       const downtimeTimer = document.getElementById('downtimeTimer');
 
       let isOnline = false;
-      let offlineSince = null;
+      let offlineSince = null; 
 
       const alertSound = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
       function enableSound() {
@@ -245,7 +243,7 @@ app.get("/", (req, res) => {
         }
         
         isOnline = data.online;
-        offlineSince = data.offlineSince; // Update timestamp from server
+        offlineSince = data.offlineSince; 
         
         if (!isOnline) {
           downtimeBox.style.display = 'block';
